@@ -1,0 +1,20 @@
+documents:
+  # Local or remote documents path
+  - path: data/raw/pdf/investment_guide.pdf
+    enabled: true
+
+chunking:
+  # Similarity score for semantic refinement
+  similarity_threshold: 0.8
+
+retrieval:
+  initial_pct: 0.8   # fetch 80% of total chunks from vector search
+  rerank_pct: 0.5    # keep 50% of initial set after reranking
+  mmr_pct: 0.6       # keep 60% of reranked set after MMR diversification
+  lambda_mult: 0.5
+  min_chunk: 2       # if total chunks <= this, skip rerank/MMR and return all
+
+generation:
+  llm_model: meta-llama/llama-4-scout-17b-16e-instruct
+  temperature: 0
+  max_output_tokens: 512

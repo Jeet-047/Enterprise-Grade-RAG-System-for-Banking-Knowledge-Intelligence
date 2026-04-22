@@ -1,0 +1,11 @@
+[project]
+name = "src"
+version = "1.0.0"
+description = "An Advance RAG System for Banking Knowledge Intelligence"
+authors = [{name = "Jeet Majumder", email = "jeet0912majumder@gmail.com"}]
+
+[tool.setuptools]
+packages = {find = {}}
+
+[tool.setuptools.dynamic]
+dependencies = {file = "requirements.txt"}
