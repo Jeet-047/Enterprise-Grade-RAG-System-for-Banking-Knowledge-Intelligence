@@ -40,27 +40,23 @@ def health():
 
 
 @router.get("/retrieval/logs") # For Retrieval observability
-def retrieval_logs(query: str | None = None):
+def retrieval_logs():
     log_dir = Path(__file__).resolve().parents[2] / "logs"
     if not log_dir.exists():
-        return {"logs": [], "message": "Logs directory not found", "path": str(log_dir)}
+        return {"message": "Logs directory not found", "path": str(log_dir)}
 
-    log_files = sorted(log_dir.glob("*.log"))
-    logs = []
+    log_files = list(log_dir.glob("*.log"))
+    if not log_files:
+        return {"message": "No log files found", "path": str(log_dir)}
 
-    for log_file in log_files:
-        file_content = log_file.read_text(encoding="utf-8", errors="replace")
-        if query:
-            if query.lower() in file_content.lower():
-                logs.append({"file": log_file.name, "content": file_content})
-        else:
-            logs.append({"file": log_file.name, "content": file_content})
+    latest_log_file = max(log_files, key=lambda p: p.stat().st_mtime)
+    file_content = latest_log_file.read_text(encoding="utf-8", errors="replace")
+    # Add a blank line between log lines for better readability in browser JSON viewers.
+    formatted_content = file_content.replace("\n", "\n\n")
 
     return {
-        "query": query,
-        "total_files": len(log_files),
-        "matched_files": len(logs),
-        "logs": logs,
+        "file": latest_log_file.name,
+        "content": formatted_content,
     }
 
 
