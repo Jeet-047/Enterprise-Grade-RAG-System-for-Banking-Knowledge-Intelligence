@@ -2,21 +2,29 @@ import os
 from fastapi import APIRouter, Header, HTTPException, Query
 from src.kb.kb_service import fetch_from_kb
 from src.security.token_manager import generate_token, validate_token
+from dotenv import load_dotenv
 
 # Initialize the api router
 router = APIRouter()
 
-INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "secret-key")
-TOKEN_EXPIRY_SECONDS = int(os.getenv("TOKEN_EXPIRY_SECONDS", "60"))
+load_dotenv()
+
+
+def _get_internal_api_key() -> str:
+    return os.getenv("INTERNAL_API_KEY", "secret-key").strip()
+
+
+def _get_token_expiry_seconds() -> int:
+    return int(os.getenv("TOKEN_EXPIRY_SECONDS", "60"))
 
 
 @router.post("/kb/token")
 def create_kb_token(x_api_key: str = Header(None, alias="X-API-KEY")):
-    if x_api_key != INTERNAL_API_KEY:
+    if (x_api_key or "").strip() != _get_internal_api_key():
         raise HTTPException(status_code=401, detail="Unauthorized API key")
 
     token = generate_token()
-    return {"token": token, "expires_in": TOKEN_EXPIRY_SECONDS}
+    return {"token": token, "expires_in": _get_token_expiry_seconds()}
 
 
 @router.post("/kb/fetch")

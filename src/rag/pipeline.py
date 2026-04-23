@@ -30,7 +30,9 @@ from dotenv import load_dotenv
 
 load_dotenv()  # Load environment variables from .env file
 
-KB_API_KEY = os.getenv("INTERNAL_API_KEY", "secret-key")
+def _get_internal_api_key() -> str:
+    """Read API key at call time to avoid stale import-time values."""
+    return os.getenv("INTERNAL_API_KEY", "secret-key").strip()
 
 
 class RAGPipeline:
@@ -229,7 +231,7 @@ class RAGPipeline:
     def request_kb_token(self) -> str | None:
         url = urllib.parse.urljoin(self.kb_api_url, "/kb/token")
         request_headers = {
-            "X-API-KEY": KB_API_KEY,
+            "X-API-KEY": _get_internal_api_key(),
             "Content-Type": "application/json",
         }
         request_obj = urllib.request.Request(url, headers=request_headers, method="POST", data=b"")
