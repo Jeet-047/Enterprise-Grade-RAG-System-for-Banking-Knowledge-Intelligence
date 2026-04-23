@@ -1,4 +1,10 @@
+import os
+import json
 import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from typing import List, Sequence
 
 from langchain_groq import ChatGroq
@@ -11,10 +17,11 @@ from src.ingestion.loaders import DocumentLoader
 from src.observability.logger import logging
 from src.preprocessing.clean_normalize import DocumentNormalizationAndCleaning
 from src.preprocessing.chunking import DocumentChunker
-from src.rag.prompts import SYSTEM_PROMPT, USER_PROMPT
+from src.rag.prompts import SYSTEM_PROMPT, USER_PROMPT, USER_PROMPT_FALLBACK_KB
 from src.retrieval.reranker import CrossEncoderReranker
 from src.retrieval.retriever import RerankMMRRetriever
 from src.vectorstore.faiss_store import FaissVectorStore
+from src.guardrails.hallucination import HallucinationDetector
 from src.utils import (
     read_yaml_file,
     build_context,
@@ -23,6 +30,7 @@ from dotenv import load_dotenv
 
 load_dotenv()  # Load environment variables from .env file
 
+KB_API_KEY = os.getenv("INTERNAL_API_KEY", "secret-key")
 
 
 class RAGPipeline:
@@ -52,6 +60,7 @@ class RAGPipeline:
 
         self.vector_store = None
         self.retriever = None
+        self.kb_api_url = self.config.get("KB", {}).get("kb_api_url")
 
     # ----------------------------
     # Data preparation
@@ -133,26 +142,48 @@ class RAGPipeline:
         logging.info("Retrieved %d documents for query", len(documents))
         return documents
 
-    def answer(self, query: str) -> str:
-        """Retrieve context and generate an answer."""
+    def answer(self, query: str) -> dict:
+        """Retrieve context, generate an answer, and use secure KB fallback on hallucination."""
         try:
             query_preview = query[:100] if len(query) > 100 else query
             logging.info("Generating answer for query: %s", query_preview)
-            
+
             documents = self.retrieve(query)
             if not documents:
                 logging.warning("No documents retrieved for query: %s", query)
                 return {
-                    "answer": "I don't have enough information to answer this question based on the provided documents.",
-                    "sources": []
+                    "final_answer": "I don't have enough information to answer this question based on the provided documents.",
+                    "source": "rag",
+                    "confidence_score": 0.0,
                 }
 
-            # Get the answer using the Stuff prompting strategy (all context in one prompt)
             answer = self._answer_with_stuff(query, documents)
-            
-            logging.info("Answer generated successfully (length: %d chars, sources: %d)", len(answer), len(documents))
-            
-            return answer
+            logging.info("Answer generated, checking hallucination")
+
+            detection = HallucinationDetector().detect_hallucination(answer, build_context(documents))
+            confidence_score = detection.get("similarity_score", 0.0)
+
+            if detection.get("is_hallucinated"):
+                logging.warning("Hallucination detected for query, using secure KB fallback")
+                token = self.request_kb_token()
+                if token:
+                    kb_data = self.secure_kb_fetch(token, query)
+                    if kb_data:
+                        final_answer = self._answer_with_kb(query, kb_data)
+                        return {
+                            "final_answer": final_answer,
+                            "source": "kb-secure",
+                            "confidence_score": confidence_score,
+                        }
+                    logging.warning("Secure KB fetch returned no match for query: %s", query)
+                else:
+                    logging.warning("Secure KB token request failed for query: %s", query)
+
+            return {
+                "final_answer": answer,
+                "source": "rag",
+                "confidence_score": confidence_score,
+            }
         except Exception as e:
             logging.exception("Failed to generate answer: %s", e)
             raise MyException(e, sys)
@@ -190,5 +221,63 @@ class RAGPipeline:
         except Exception:
             logging.debug("Answer preview: [contains non-ASCII characters]")
         return answer
+
+    # ----------------------------
+    # Secure KB Fallback Functions
+    # ----------------------------
+
+    def request_kb_token(self) -> str | None:
+        url = urllib.parse.urljoin(self.kb_api_url, "/kb/token")
+        request_headers = {
+            "X-API-KEY": KB_API_KEY,
+            "Content-Type": "application/json",
+        }
+        request_obj = urllib.request.Request(url, headers=request_headers, method="POST", data=b"")
+
+        try:
+            with urllib.request.urlopen(request_obj, timeout=10) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+                return payload.get("token")
+        except urllib.error.HTTPError as exc:
+            logging.error("KB token request failed with HTTP status %s", exc.code)
+        except Exception as exc:
+            logging.error("KB token request failed: %s", exc)
+        return None
+
+    def secure_kb_fetch(self, token: str, query: str) -> str | None:
+        query_string = urllib.parse.urlencode({"query": query})
+        url = f"{self.kb_api_url}/kb/fetch?{query_string}"
+        request_headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+        request_obj = urllib.request.Request(url, headers=request_headers, method="POST", data=b"")
+
+        try:
+            with urllib.request.urlopen(request_obj, timeout=10) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+                return payload.get("data")
+        except urllib.error.HTTPError as exc:
+            logging.error("Secure KB fetch failed with HTTP status %s", exc.code)
+        except Exception as exc:
+            logging.error("Secure KB fetch failed: %s", exc)
+        return None
+
+    def _answer_with_kb(self, query: str, kb_data: str) -> str:
+
+        #Build the user prompt
+        user_prompt = USER_PROMPT_FALLBACK_KB.format(
+            kb_context = kb_data,
+            question = query
+        )
+
+        messages = [
+            SystemMessage(content=SYSTEM_PROMPT),
+            HumanMessage(content=user_prompt),
+        ]
+
+        response = self.llm.invoke(messages)
+        final_answer = getattr(response, "content", str(response))
+        return final_answer
 
     

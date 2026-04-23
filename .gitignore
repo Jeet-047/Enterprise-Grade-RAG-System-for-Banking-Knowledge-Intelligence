@@ -211,11 +211,6 @@ rag_env/
 logs/
 Dockerfile
 test_config.py
-data/
-
-api/
 evaluation/
-guardrails/
-kb/
-security/
+data/
 ui/

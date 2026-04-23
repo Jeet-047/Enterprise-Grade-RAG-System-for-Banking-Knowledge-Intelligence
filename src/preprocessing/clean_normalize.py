@@ -46,19 +46,19 @@ class DocumentNormalizationAndCleaning:
 
         for extracted_doc_dict in extracted_doc:
             if 'text' not in extracted_doc_dict or 'metadata' not in extracted_doc_dict:
-                raise ValueError("Each input dictionary must contain 'text' and 'metadata' keys.")
+                raise MyException("Each input dictionary must contain 'text' and 'metadata' keys.", sys)
             if 'doc_type' not in extracted_doc_dict['metadata']:
-                raise ValueError("Metadata must contain 'doc_type' key.")
+                raise MyException("Metadata must contain 'doc_type' key.", sys)
 
             raw_text = extracted_doc_dict['text']
             doc_type = extracted_doc_dict['metadata']['doc_type']
             cleaned_text = raw_text # Initialize with raw text, cleaning methods will modify this
 
-            print(f"Cleaning document of type: {doc_type}")
-            print(f"Original text length: {len(raw_text)}")
+            logging.info(f"Cleaning document of type: {doc_type}")
+            logging.info(f"Original text length: {len(raw_text)}")
 
             if doc_type == 'web':
-                print("Applying Web specific cleaning with BeautifulSoup...")
+                logging.info("Applying Web specific cleaning with BeautifulSoup...")
                 soup = BeautifulSoup(raw_text, 'html.parser')
 
                 # Remove script and style elements
@@ -68,7 +68,7 @@ class DocumentNormalizationAndCleaning:
                 # Get text
                 cleaned_text = soup.get_text()
             elif doc_type == 'csv':
-                print("Applying CSV specific cleaning...")
+                logging.info("Applying CSV specific cleaning...")
 
                 # For CSV, we might want to preserve line breaks but remove excessive whitespace
                 cleaned_text = re.sub(r"[ \t]+", " ", raw_text)  # Collapse spaces and tabs
@@ -77,7 +77,7 @@ class DocumentNormalizationAndCleaning:
                 # Trim leading/trailing whitespace
                 cleaned_text = cleaned_text.strip()
             else: # General text (pdf, docx). No specific structural cleaning needed before normalization.
-                print(f"No specific structural cleaning for {doc_type}. Applying general text normalization.")
+                logging.info(f"No specific structural cleaning for {doc_type}. Applying general text normalization.")
                 cleaned_text = raw_text
 
             # Update the text in the current dictionary and append to the new list

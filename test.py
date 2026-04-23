@@ -17,28 +17,21 @@ def test_rag_pipeline():
         print("Vector store prepared successfully.")
 
         # Sample query
-        query = "Tell me about risk and return?"
+        query = "tell me about rag?"
 
         print(f"Testing with query: {query}")
 
-        # Retrieve documents
-        print("Retrieving relevant documents...")
-        documents = pipeline.retrieve(query)
-        print(f"Retrieved {len(documents)} documents.")
-
-        # Generate answer
+        # Generate answer (this internally calls retrieve)
         print("Generating answer...")
-        answer = pipeline.answer(query)
+        response = pipeline.answer(query)
 
         print("\n" + "="*50)
         print("RESULTS:")
         print("="*50)
         print(f"Query: {query}")
-        print(f"Number of retrieved documents: {len(documents)}")
-        if documents:
-            print("Sample document content (first 200 chars):")
-            print(documents[0].page_content[:200] + "...")
-        print(f"Answer: {answer}")
+        print(f"Answer: {response["final_answer"]}")
+        print(f"Confident Score: {response["confidence_score"]}")
+        print(f"Source: {response["source"]}")
         print("="*50)
 
     except Exception as e:

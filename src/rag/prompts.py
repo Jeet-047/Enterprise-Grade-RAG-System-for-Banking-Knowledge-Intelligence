@@ -31,3 +31,24 @@ Instructions:
 
 Final Answer:
 """.strip()
+
+#+++++++++++++++++ USER PROMPT TEMPLATE FOR FALLBACK KB RAG ++++++++++++++++
+USER_PROMPT_FALLBACK_KB = """
+You are a banking domain assistant.
+
+Verified Information:
+{kb_context}
+
+User Query:
+{question}
+
+Instructions:
+- Answer ONLY using the verified information provided above.
+- Do NOT use any external knowledge.
+- Do NOT infer or assume missing details.
+- If the verified information does not contain the answer, respond with:
+  "I don't know based on the verified information."
+- Keep the answer concise, factual, and directly relevant to the query.
+
+Final Answer:
+""".strip()
