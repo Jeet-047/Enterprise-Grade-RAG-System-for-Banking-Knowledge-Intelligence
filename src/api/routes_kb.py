@@ -1,11 +1,15 @@
 import os
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi.security import HTTPBearer
 from src.kb.kb_service import fetch_from_kb
 from src.security.token_manager import generate_token, validate_token
 from dotenv import load_dotenv
 
 # Initialize the api router
 router = APIRouter()
+
+# Initialize HTTP Bearer security for Swagger UI
+security = HTTPBearer()
 
 load_dotenv()
 
@@ -28,11 +32,8 @@ def create_kb_token(x_api_key: str = Header(None, alias="X-API-KEY")):
 
 
 @router.post("/kb/fetch")
-def fetch_kb_data(query: str = Query(...), authorization: str = Header(None, alias="Authorization")):
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Access Denied")
-
-    token = authorization.split(" ", 1)[1].strip()
+def fetch_kb_data(query: str = Query(...), credentials = Depends(security)):
+    token = credentials.credentials
     if not validate_token(token):
         raise HTTPException(status_code=401, detail="Access Denied")
 

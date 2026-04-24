@@ -27,11 +27,25 @@ def query_debug(payload: QueryRequest):
     context_chunks = [doc.page_content for doc in docs]
     detection = HallucinationDetector().detect_hallucination(answer, build_context(docs) if docs else "")
 
-    return {
-        "retrieved_chunks": context_chunks,
-        "similarity_score": float(detection.get("similarity_score", 0.0)),
-        "hallucination_decision": bool(detection.get("is_hallucinated", False)),
-    }
+    if not detection.get("is_hallucinated"):
+        return {
+            "retrieved_chunks": context_chunks,
+            "similarity_score": float(detection.get("similarity_score", 0.0)),
+            "hallucination_decision": False,
+        }
+    else:
+        token = pipeline.request_kb_token()
+        kb_data = pipeline.secure_kb_fetch(token, payload.query)
+        kb_answer = pipeline._answer_with_kb(payload.query, kb_data)
+        return {
+            "retrieved_chunks": context_chunks,
+            "similarity_score": float(detection.get("similarity_score", 0.0)),
+            "hallucination_decision": True,
+            "kb_used": True,
+            "kb_data": kb_data,
+            "kb_answer": kb_answer
+        }
+
 
 
 @router.get("/health")
