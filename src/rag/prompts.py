@@ -8,9 +8,10 @@ Rules:
 - If the answer is not clearly available in the context, respond with: "I don't know based on the provided information."
 - Do NOT generate speculative or approximate answers.
 - Keep responses concise, factual, and relevant to banking queries.
+- Present the answer as a clear and complete sentence.
 - Include key details like rates, eligibility, or conditions only if explicitly mentioned in the context.
 
-Your goal is to ensure correctness, not completeness.
+Your goal is to ensure correctness, clarity, and readability.
 """.strip()
 
 #+++++++++++++++++ USER PROMPT TEMPLATE FOR BANKING RAG ++++++++++++++++
@@ -24,8 +25,9 @@ User Query:
 {question}
 
 Instructions:
-- Extract the exact answer from the context.
-- Do not infer or assume missing values.
+- Identify the exact answer from the context.
+- Convert the extracted information into a clear and complete sentence.
+- Do NOT infer or assume missing values.
 - If multiple values exist, choose the most relevant.
 - If not found, respond: "I don't know based on the provided information."
 
@@ -44,11 +46,13 @@ User Query:
 
 Instructions:
 - Answer ONLY using the verified information provided above.
+- Convert the information into a clear and complete sentence.
 - Do NOT use any external knowledge.
 - Do NOT infer or assume missing details.
+- Do NOT modify numerical values (rates, percentages, amounts).
 - If the verified information does not contain the answer, respond with:
   "I don't know based on the verified information."
-- Keep the answer concise, factual, and directly relevant to the query.
+- Keep the answer concise and directly relevant to the query.
 
 Final Answer:
 """.strip()

@@ -1,29 +1,33 @@
 import sys
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_nvidia_ai_endpoints import NVIDIAEmbeddings
 from src.observability.logger import logging
 from src.exception import MyException
+from src.utils import read_yaml_file
+from dotenv import load_dotenv
 
+load_dotenv()
 
-class HuggingFaceEmbedder:
+class NVIDIAEmbedder:
     """
-    Thin wrapper around LangChain's HuggingFaceEmbeddings to delay initialization
-    until it is actually needed.
+    An wrapper class that provides a consistent interface for embedding operations using NVIDIA's embedding service.
     """
 
-    def __init__(self, model_name: str = "BAAI/bge-base-en-v1.5"):
-        # Model name should eventually come from configuration/constants.
-        self.model_name = model_name
+    def __init__(self, config_path: str = "config/settings.yaml"):
+        # Initialize the config for embedder requirements
+        self.config = read_yaml_file(config_path)
+
+        emb_cfg = self.config.get("embedder", {})
+        self.model_name = emb_cfg["model"]
         self._embedder = None
-
-    def get_embedder(self) -> HuggingFaceEmbeddings:
-        """Create (once) and return the HuggingFace embedding model."""
+    
+    def get_embedder(self) -> NVIDIAEmbeddings:
+        """Create (once) and return the NVIDIA embedding model."""
         if self._embedder is None:
             try:
-                logging.info("Initializing the HuggingFace embedder.")
-                self._embedder = HuggingFaceEmbeddings(
-                    model_name=self.model_name,
-                    model_kwargs={'device': 'cpu'},
-                    encode_kwargs={'normalize_embeddings': True}
+                logging.info("Initializing the NVIDIA embedder.")
+                self._embedder = NVIDIAEmbeddings(
+                    model=self.model_name,
+                    truncate="NONE"
                 )
             except Exception as e:
                 raise MyException(e, sys)

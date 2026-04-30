@@ -1,9 +1,7 @@
-langchain
 langchain_community
 langchain_core
-langchain-classic
 langchain_groq
-langchain_huggingface
+langchain-nvidia-ai-endpoints
 python-dotenv
 fastapi
 uvicorn
@@ -11,6 +9,7 @@ faiss-cpu
 tiktoken
 pypdf
 from_root
-sentence-transformers
 beautifulsoup4
+streamlit
+requests
 -e .

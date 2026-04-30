@@ -57,8 +57,7 @@ class RAGPipeline:
 
         retr_cfg = self.config.get("retrieval", {})
         self.reranker = CrossEncoderReranker(
-            model_name=retr_cfg.get("reranker_model", "cross-encoder/ms-marco-MiniLM-L-6-v2")
-        )
+            model_name=retr_cfg.get("reranker_model", "nv-rerank-qa-mistral-4b:1"))
 
         self.vector_store = None
         self.retriever = None
@@ -169,17 +168,19 @@ class RAGPipeline:
                 logging.warning("Hallucination detected for query, using secure KB fallback")
                 token = self.request_kb_token()
                 if token:
-                    kb_data = self.secure_kb_fetch(token, query)
-                    if kb_data:
-                        final_answer = self._answer_with_kb(query, kb_data)
+                    kb_info = self.secure_kb_fetch(token, query)
+                    if kb_info and kb_info.get("data"):
+                        final_answer = self._answer_with_kb(query, kb_info["data"])
                         return {
                             "final_answer": final_answer,
                             "source": "kb-secure",
-                            "confidence_score": confidence_score,
+                            "confidence_score": kb_info.get("score", 0.0),
                         }
                     logging.warning("Secure KB fetch returned no match for query: %s", query)
                 else:
                     logging.warning("Secure KB token request failed for query: %s", query)
+            else:
+                logging.info("No hallucination detected, return final answer.")
 
             return {
                 "final_answer": answer,
@@ -246,7 +247,7 @@ class RAGPipeline:
             logging.error("KB token request failed: %s", exc)
         return None
 
-    def secure_kb_fetch(self, token: str, query: str) -> str | None:
+    def secure_kb_fetch(self, token: str, query: str) -> dict | None:
         query_string = urllib.parse.urlencode({"query": query})
         url = f"{self.kb_api_url}/kb/fetch?{query_string}"
         request_headers = {
@@ -258,7 +259,10 @@ class RAGPipeline:
         try:
             with urllib.request.urlopen(request_obj, timeout=10) as response:
                 payload = json.loads(response.read().decode("utf-8"))
-                return payload.get("data")
+                score = payload.get("score")
+                if score is None:
+                    score = 0.0
+                return {"data": payload.get("data"), "score": float(score)}
         except urllib.error.HTTPError as exc:
             logging.error("Secure KB fetch failed with HTTP status %s", exc.code)
         except Exception as exc:

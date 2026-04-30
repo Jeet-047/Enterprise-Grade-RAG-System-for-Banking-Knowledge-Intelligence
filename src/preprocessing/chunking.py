@@ -1,9 +1,9 @@
+import sys
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from src.observability.logger import logging
 from src.exception import MyException
-import sys
-from sentence_transformers import SentenceTransformer
+from src.embedding.embedder import NVIDIAEmbedder
 from sklearn.metrics.pairwise import cosine_similarity
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import traceback
@@ -11,7 +11,8 @@ import traceback
 
 class DocumentChunker:
     def __init__(self):
-        pass
+        # Initialize the embedder mode one time
+        self.embedder = NVIDIAEmbedder().get_embedder()
 
     def structure_aware_splitter(self, extracted_doc_dict):
         """
@@ -85,7 +86,7 @@ class DocumentChunker:
             # Use parallel processing for multiple documents
             with ThreadPoolExecutor(max_workers=min(len(cleaned_doc_list), 4)) as executor:
                 # Submit tasks for each document
-                futures = [executor.submit(process_single_document, doc, similarity_threshold) for doc in cleaned_doc_list]
+                futures = [executor.submit(self.process_single_document, doc, similarity_threshold) for doc in cleaned_doc_list]
                 # Collect results as they complete
                 for future in as_completed(futures):
                     try:
@@ -123,28 +124,26 @@ class DocumentChunker:
         """
         Perform semantic refinement on structural chunks.
         """
-        model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
-        return semantic_refinement_worker(structural_chunks, similarity_threshold, model)
+        return semantic_refinement_worker(structural_chunks, similarity_threshold, self.embedder)
 
 
-# Standalone functions for parallel processing (must be at module level for pickling)
-def process_single_document(extracted_doc_dict, similarity_threshold):
-    """
-    Standalone function to process a single document in parallel.
-    This function is completely independent and can be pickled for multiprocessing.
-    """
-    try:
-        # Perform structure-aware splitting
-        structural_chunks = structure_aware_splitter_standalone(extracted_doc_dict)
-        
-        # Load model and perform semantic refinement
-        model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
-        refined_chunks = semantic_refinement_worker(structural_chunks, similarity_threshold, model)
-        
-        return refined_chunks
-    except Exception as e:
-        # Re-raise with more context for debugging
-        raise Exception(f"Error processing document: {e}")
+    # Standalone functions for parallel processing (must be at module level for pickling)
+    def process_single_document(self, extracted_doc_dict, similarity_threshold):
+        """
+        Standalone function to process a single document in parallel.
+        This function is completely independent and can be pickled for multiprocessing.
+        """
+        try:
+            # Perform structure-aware splitting
+            structural_chunks = structure_aware_splitter_standalone(extracted_doc_dict)
+            
+            # Load model and perform semantic refinement
+            refined_chunks = semantic_refinement_worker(structural_chunks, similarity_threshold, self.embedder)
+            
+            return refined_chunks
+        except Exception as e:
+            # Re-raise with more context for debugging
+            raise Exception(f"Error processing document: {e}")
 
 
 def structure_aware_splitter_standalone(extracted_doc_dict):
@@ -200,7 +199,7 @@ def semantic_refinement_worker(structural_chunks, similarity_threshold, model):
             refined_chunks.append(structural_chunk)
             continue
 
-        embeddings = model.encode(sentences)
+        embeddings = model.embed_documents(sentences)
 
         semantic_chunks = []
         current_group = [sentences[0]]

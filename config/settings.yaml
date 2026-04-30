@@ -5,21 +5,25 @@ documents:
 
 chunking:
   # Similarity score for semantic refinement
-  similarity_threshold: 0.8
+  similarity_threshold: 0.6
+
+embedder:
+  model: nvidia/nv-embedcode-7b-v1
 
 retrieval:
   initial_pct: 0.8   # fetch 80% of total chunks from vector search
-  rerank_pct: 0.5    # keep 50% of initial set after reranking
-  mmr_pct: 0.6       # keep 60% of reranked set after MMR diversification
-  lambda_mult: 0.5
+  rerank_pct: 0.4    # keep 40% of initial set after reranking
+  mmr_pct: 0.3       # keep 30% of reranked set after MMR diversification
+  lambda_mult: 0.7   # keep the context balanced between relevance and diversity 
   min_chunk: 2       # if total chunks <= this, skip rerank/MMR and return all
+  reranker_model: nv-rerank-qa-mistral-4b:1
 
 generation:
   llm_model: meta-llama/llama-4-scout-17b-16e-instruct
-  temperature: 0
+  temperature: 0.2
   max_output_tokens: 512
 
 KB:
   kb_api_url: http://127.0.0.1:8000
-  similarity_threshold: 0.2
+  similarity_threshold: 0.3
   top_k_relevant: 3

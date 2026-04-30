@@ -1,17 +1,17 @@
 import numpy as np
+from src.embedding.embedder import NVIDIAEmbedder
 
 class HallucinationDetector:
     def __init__(self):
-        from sentence_transformers import SentenceTransformer
 
-        self.model = SentenceTransformer("all-MiniLM-L6-v2")
+        self.embedder = NVIDIAEmbedder().get_embedder()
     
     def compute_similarity(self, answer, context):
         from sklearn.metrics.pairwise import cosine_similarity
 
         # Encode the answer and context into embeddings
-        answer_embedding = self.model.encode([answer])
-        context_embedding = self.model.encode(context)
+        answer_embedding = self.embedder.embed_documents([answer])
+        context_embedding = self.embedder.embed_documents(context)
         
         # Compute cosine similarity between the answer and each context chunk
         similarities = cosine_similarity(answer_embedding, context_embedding)[0]

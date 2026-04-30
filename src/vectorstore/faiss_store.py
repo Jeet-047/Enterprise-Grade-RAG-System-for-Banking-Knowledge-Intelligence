@@ -1,15 +1,15 @@
 from langchain_core.documents import Document
 from langchain_community.vectorstores import FAISS
-from src.embedding.embedder import HuggingFaceEmbedder
+from src.embedding.embedder import NVIDIAEmbedder
 from src.exception import MyException
 import sys
 
 class FaissVectorStore:
     def __init__(self):
         """
-        Initialize the Ollama Embedder
+        Initialize the NVIDIA Embedder
         """
-        self.embedder = HuggingFaceEmbedder().get_embedder()
+        self.embedder = NVIDIAEmbedder().get_embedder()
         
     def create_vector_store(self, documents: list) -> FAISS:
             """This function create a FAISS vector store and return it.

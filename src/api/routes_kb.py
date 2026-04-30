@@ -37,8 +37,8 @@ def fetch_kb_data(query: str = Query(...), credentials = Depends(security)):
     if not validate_token(token):
         raise HTTPException(status_code=401, detail="Access Denied")
 
-    data = fetch_from_kb(query)
-    if data is None:
+    kb_info = fetch_from_kb(query)
+    if kb_info is None:
         return {"data": None, "message": "No KB match for query"}
 
-    return {"data": data}
+    return {"data": kb_info["kb_context"], "score": kb_info["score"]}

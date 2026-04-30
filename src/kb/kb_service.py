@@ -1,13 +1,13 @@
 from sklearn.metrics.pairwise import cosine_similarity
 from src.kb.kb_store import KB_STORE
-from src.embedding.embedder import HuggingFaceEmbedder
+from src.embedding.embedder import NVIDIAEmbedder
 from src.exception import MyException
 from src.utils import read_yaml_file
 import numpy as np
 import sys
 
 # Initialize embedder
-model = HuggingFaceEmbedder().get_embedder()
+model = NVIDIAEmbedder().get_embedder()
 # Prepare KB
 kb_items = list(KB_STORE.items())
 kb_texts = [value for _, value in kb_items]
@@ -19,7 +19,7 @@ similarity_threshold = kb_cfg["similarity_threshold"]
 top_k_relevant = kb_cfg["top_k_relevant"]
 
 
-def fetch_from_kb(query: str) -> str | None:
+def fetch_from_kb(query: str) -> dict | None:
     """
     Fetch top-N most relevant KB entries using semantic similarity
     and return them as a formatted string.
@@ -41,6 +41,8 @@ def fetch_from_kb(query: str) -> str | None:
         sorted_indices = scores.argsort()[::-1]
 
         selected_results = []
+        score_sum = 0.0
+        unique_count = 0
 
         for idx in sorted_indices:
             score = float(scores[idx])
@@ -53,19 +55,24 @@ def fetch_from_kb(query: str) -> str | None:
             # Avoid duplicates
             if value not in selected_results:
                 selected_results.append(value)
+                score_sum += score
+                unique_count += 1
 
             if len(selected_results) >= top_k_relevant:
                 break
-
+        
         if not selected_results:
             return None
+        
+        # Final confidence score for matched KB items only
+        cfd_score = float(score_sum / unique_count) if unique_count > 0 else 0.0
 
         # Format output cleanly
         formatted_output = "\n\n".join(
             [f"{i+1}. {text}" for i, text in enumerate(selected_results)]
         )
 
-        return formatted_output
+        return {"kb_context": formatted_output, "score": cfd_score}
 
     except Exception as e:
         raise MyException(f"Error during KB fetching: {e}", sys)
