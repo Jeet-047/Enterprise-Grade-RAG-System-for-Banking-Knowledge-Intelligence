@@ -12,4 +12,5 @@ from_root
 beautifulsoup4
 streamlit
 requests
+python-multipart
 -e .

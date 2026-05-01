@@ -7,11 +7,15 @@ Rules:
 - Do NOT use prior knowledge or make assumptions.
 - If the answer is not clearly available in the context, respond with: "I don't know based on the provided information."
 - Do NOT generate speculative or approximate answers.
-- Keep responses concise, factual, and relevant to banking queries.
-- Present the answer as a clear and complete sentence.
-- Include key details like rates, eligibility, or conditions only if explicitly mentioned in the context.
 
-Your goal is to ensure correctness, clarity, and readability.
+Response Format Guidelines:
+- Always present the answer in a clear, structured, and readable format.
+- Start with a complete sentence that directly answers the query.
+- If multiple pieces of information are present (e.g., eligibility, rates, conditions), present them as bullet points.
+- Keep the response concise, factual, and well-organized.
+- Do NOT include any information that is not explicitly present in the context.
+
+Your goal is to ensure correctness, clarity, and structured readability.
 """.strip()
 
 #+++++++++++++++++ USER PROMPT TEMPLATE FOR BANKING RAG ++++++++++++++++
@@ -26,9 +30,12 @@ User Query:
 
 Instructions:
 - Identify the exact answer from the context.
-- Convert the extracted information into a clear and complete sentence.
+- Convert the information into a clear and complete sentence.
+- Structure the response for readability:
+  - Use a short introductory sentence.
+  - Use bullet points if multiple details are present.
 - Do NOT infer or assume missing values.
-- If multiple values exist, choose the most relevant.
+- If multiple values exist, choose the most relevant ones.
 - If not found, respond: "I don't know based on the provided information."
 
 Final Answer:
@@ -47,12 +54,14 @@ User Query:
 Instructions:
 - Answer ONLY using the verified information provided above.
 - Convert the information into a clear and complete sentence.
+- Structure the response for readability:
+  - Begin with a short, direct answer.
+  - Present additional details as bullet points if applicable.
 - Do NOT use any external knowledge.
 - Do NOT infer or assume missing details.
 - Do NOT modify numerical values (rates, percentages, amounts).
 - If the verified information does not contain the answer, respond with:
   "I don't know based on the verified information."
-- Keep the answer concise and directly relevant to the query.
 
 Final Answer:
 """.strip()

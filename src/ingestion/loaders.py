@@ -1,4 +1,4 @@
-from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, CSVLoader , WebBaseLoader, TextLoader, TextLoader, TextLoader
+from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, CSVLoader , WebBaseLoader
 from src.observability.logger import logging
 from src.exception import MyException
 import sys
