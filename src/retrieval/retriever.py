@@ -9,7 +9,7 @@ from langchain_community.vectorstores import FAISS
 from src.exception import MyException
 from src.observability.logger import logging
 from src.retrieval.reranker import CrossEncoderReranker
-from src.utils import compute_k, count_documents, cosine_similarity
+from src.utils import compute_k, count_documents
 
 
 class RerankMMRRetriever:
@@ -147,67 +147,49 @@ class RerankMMRRetriever:
     def _apply_mmr(
         self, query: str, candidates: Sequence[Document], k: int, lambda_mult: float
     ) -> List[Document]:
-        """Apply maximal marginal relevance over reranked candidates."""
         if not candidates or k <= 0:
             return []
 
+        n_docs = len(candidates)
+        k = min(k, n_docs)
+
         try:
             query_vec = np.array(self.embedder.embed_query(query), dtype=np.float32)
-            logging.debug("Successfully embedded query for MMR.")
+            doc_vecs = np.array(
+                self.embedder.embed_documents([doc.page_content for doc in candidates]),
+                dtype=np.float32
+            )
         except Exception as e:
-            logging.error("Failed to embed query in MMR: %s", e)
-            raise MyException(f"Query embedding failed in MMR: {e}", sys)
+            logging.error("Failed to embed query/docs in MMR: %s", e)
+            raise MyException(f"Embedding failed in MMR: {e}", sys)
 
-        try:
-            doc_vecs = [
-                np.array(vec, dtype=np.float32)
-                for vec in self.embedder.embed_documents(
-                    [doc.page_content for doc in candidates]
-                )
-            ]
-            logging.debug("Successfully embedded %d documents for MMR.", len(doc_vecs))
-        except Exception as e:
-            logging.error("Failed to embed documents in MMR: %s", e)
-            raise MyException(f"Document embedding failed in MMR: {e}", sys)
+        query_norm = np.linalg.norm(query_vec)
+        doc_norms = np.linalg.norm(doc_vecs, axis=1)
 
-        # Pre-compute norms to avoid redundant calculations in the MMR selection loop
-        try:
-            query_norm = np.linalg.norm(query_vec)
-            doc_norms = np.array([np.linalg.norm(vec) for vec in doc_vecs], dtype=np.float32)
-            logging.debug("Pre-computed norms for query and documents.")
-        except Exception as e:
-            logging.error("Failed to compute norms for MMR: %s", e)
-            raise MyException(f"Norm computation failed in MMR: {e}", sys)
+        query_doc_sims = np.dot(doc_vecs, query_vec) / (doc_norms * query_norm + 1e-8)
+        doc_doc_sims = np.dot(doc_vecs, doc_vecs.T) / (np.outer(doc_norms, doc_norms) + 1e-8)
 
-        selected: list[int] = []
-        remaining = list(range(len(candidates)))
+        selected: set[int] = set()
+        remaining = set(range(n_docs))
 
-        try:
-            while remaining and len(selected) < k:
-                if not selected:
-                    # Pick best relevance to query
-                    chosen = max(
-                        remaining,
-                        key=lambda idx: cosine_similarity(query_vec, query_norm, doc_vecs[idx], doc_norms[idx])
-                    )
-                else:
-                    # Pick document with best balance of relevance and diversity
-                    def mmr_score(idx):
-                        relevance = cosine_similarity(query_vec, query_norm, doc_vecs[idx], doc_norms[idx])
-                        redundancy = max(
-                            cosine_similarity(doc_vecs[idx], doc_norms[idx], doc_vecs[sel_idx], doc_norms[sel_idx])
-                            for sel_idx in selected
-                        )
-                        return lambda_mult * relevance - (1 - lambda_mult) * redundancy
-                    
-                    chosen = max(remaining, key=mmr_score)
-                
-                selected.append(chosen)
-                remaining.remove(chosen)
-            
-            logging.debug("MMR selection completed with %d documents.", len(selected))
-            return [candidates[idx] for idx in selected]
-        except Exception as e:
-            logging.error("Failed during MMR selection loop: %s", e)
-            raise MyException(f"MMR selection failed: {e}", sys)
+        for _ in range(k):
+            if not remaining:
+                break
+
+            if not selected:
+                chosen = max(remaining, key=lambda idx: query_doc_sims[idx])
+            else:
+                scores = np.array([
+                    lambda_mult * query_doc_sims[idx] -
+                    (1 - lambda_mult) * max(doc_doc_sims[idx, s] for s in selected)
+                    for idx in remaining
+                ])
+                remaining_list = list(remaining)
+                chosen = remaining_list[np.argmax(scores)]
+
+            selected.add(chosen)
+            remaining.discard(chosen)
+
+        logging.debug("MMR selection completed with %d documents.", len(selected))
+        return [candidates[idx] for idx in sorted(selected)]
 

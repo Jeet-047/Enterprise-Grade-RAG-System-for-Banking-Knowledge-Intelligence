@@ -1,5 +1,5 @@
 documents:
-- path: https://jeetmajumder.vercel.app/
+- path: your_document_path
   enabled: true
 chunking:
   similarity_threshold: 0.6

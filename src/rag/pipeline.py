@@ -1,7 +1,6 @@
 import os
 import json
 import sys
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -22,207 +21,207 @@ from src.retrieval.reranker import CrossEncoderReranker
 from src.retrieval.retriever import RerankMMRRetriever
 from src.vectorstore.faiss_store import FaissVectorStore
 from src.guardrails.hallucination import HallucinationDetector
-from src.utils import (
-    read_yaml_file,
-    build_context,
-)
+from src.utils import read_yaml_file, build_context
 from dotenv import load_dotenv
 
-load_dotenv()  # Load environment variables from .env file
+load_dotenv()
 
 def _get_internal_api_key() -> str:
     """Read API key at call time to avoid stale import-time values."""
     return os.getenv("INTERNAL_API_KEY", "secret-key").strip()
 
 
+def _ensure_valid_ssl_cert_env() -> None:
+    """Remove broken SSL_CERT_FILE env var so httpx can use default cert store."""
+    cert_file = os.getenv("SSL_CERT_FILE", "").strip()
+    if cert_file and not os.path.exists(cert_file):
+        logging.warning("Ignoring invalid SSL_CERT_FILE path: %s", cert_file)
+        os.environ.pop("SSL_CERT_FILE", None)
+
+
 class RAGPipeline:
-    """
-    End-to-end RAG pipeline:
-    1) Load + clean + chunk documents
-    2) Build vector store
-    3) Retrieve -> rerank -> MMR
-    4) Choose Stuff vs Summarized-Context prompting and query LLM
-    """
-
     def __init__(self, config_path: str = "config/settings.yaml"):
-        self.config = read_yaml_file(config_path)
-
-        gen_cfg = self.config.get("generation", {})
-        self.llm = ChatGroq(
-            model=gen_cfg["llm_model"],
-            temperature=gen_cfg["temperature"],
-            max_tokens=gen_cfg["max_output_tokens"],
-            streaming=True
-        )
-
-        retr_cfg = self.config.get("retrieval", {})
-        self.reranker = CrossEncoderReranker(
-            model_name=retr_cfg.get("reranker_model", "nv-rerank-qa-mistral-4b:1"))
-
+        self._config = None
+        self._config_path = config_path
+        self._llm = None
+        self._reranker = None
+        self._hallucination_detector = None
         self.vector_store = None
         self.retriever = None
-        self.kb_api_url = self.config.get("KB", {}).get("kb_api_url")
+
+    @property
+    def config(self):
+        if self._config is None:
+            self._config = read_yaml_file(self._config_path)
+        return self._config
+
+    @property
+    def llm(self):
+        if self._llm is None:
+            _ensure_valid_ssl_cert_env()
+            gen_cfg = self.config.get("generation", {})
+            self._llm = ChatGroq(
+                model=gen_cfg["llm_model"],
+                temperature=gen_cfg["temperature"],
+                max_tokens=gen_cfg["max_output_tokens"],
+                streaming=True
+            )
+        return self._llm
+
+    @property
+    def reranker(self):
+        if self._reranker is None:
+            retr_cfg = self.config.get("retrieval", {})
+            self._reranker = CrossEncoderReranker(
+                model_name=retr_cfg.get("reranker_model", "nv-rerank-qa-mistral-4b:1"))
+        return self._reranker
+
+    @property
+    def kb_api_url(self):
+        return self.config.get("KB", {}).get("kb_api_url")
+
+    @property
+    def hallucination_detector(self):
+        if self._hallucination_detector is None:
+            self._hallucination_detector = HallucinationDetector()
+        return self._hallucination_detector
 
     # ----------------------------
     # Data preparation
     # ----------------------------
     def prepare_vector_store(self) -> None:
-        """Load documents, clean, chunk, and build FAISS vector store."""
-        try:
-            docs_cfg = self.config.get("documents", {})
-            if not docs_cfg:
-                raise MyException("No documents configured for processing.", sys)
-            
-            chunk_cfg = self.config.get("chunking", {})
-            similarity_threshold = chunk_cfg["similarity_threshold"]
-            
-            logging.info("Starting vector store preparation with %d document(s)", len(docs_cfg))
+        docs_cfg = self.config.get("documents", {})
+        if not docs_cfg:
+            raise MyException("No documents configured for processing.", sys)
 
-            # Initialize processing components
-            loader = DocumentLoader()
-            extractor = DocumentExtractor()
-            cleaner = DocumentNormalizationAndCleaning()
-            chunker = DocumentChunker()
+        chunk_cfg = self.config.get("chunking", {})
+        similarity_threshold = chunk_cfg["similarity_threshold"]
 
-            # Process each document
-            all_chunks = []
-            for idx, doc_info in enumerate(docs_cfg, 1):
-                if not doc_info.get("enabled", True):
-                    logging.info("Skipping disabled document: %s", doc_info.get("path", "unknown"))
+        logging.info("Starting vector store preparation with %d document(s)", len(docs_cfg))
+
+        loader = DocumentLoader()
+        extractor = DocumentExtractor()
+        cleaner = DocumentNormalizationAndCleaning()
+        chunker = DocumentChunker()
+
+        all_chunks = []
+        for idx, doc_info in enumerate(docs_cfg, 1):
+            if not doc_info.get("enabled", True):
+                logging.info("Skipping disabled document: %s", doc_info.get("path", "unknown"))
+                continue
+
+            path = doc_info["path"]
+            logging.info("[%d/%d] Processing document: %s", idx, len(docs_cfg), path)
+
+            try:
+                loaded = loader.load_document(path)
+                extracted = extractor.extract_document_info(loaded, path)
+                cleaned = cleaner.initialize_document_normalizer(extracted)
+                cleaned = [d for d in cleaned if (d.get("text") or "").strip()]
+                if not cleaned:
+                    logging.warning("No extractable text found in document: %s", path)
                     continue
-                
-                path = doc_info["path"]
-                logging.info("[%d/%d] Processing document: %s", idx, len(docs_cfg), path)
+                chunks = chunker.chunk_document(cleaned, similarity_threshold)
+                if not chunks:
+                    logging.warning("No chunks generated from document (possibly low/empty text): %s", path)
+                    continue
 
-                try:
-                    # Pipeline: load -> extract -> clean -> chunk
-                    loaded = loader.load_document(path)
-                    extracted = extractor.extract_document_info(loaded, path)
-                    cleaned = cleaner.initialize_document_normalizer(extracted)
-                    chunks = chunker.chunk_document(cleaned, similarity_threshold)
-                    
-                    logging.info("Generated %d chunks from document: %s", len(chunks), path)
-                    all_chunks.extend(chunks)
-                except Exception as e:
-                    logging.error("Failed to process document %s: %s", path, e)
-                    raise MyException(f"Error processing document {path}: {e}", sys)
+                logging.info("Generated %d chunks from document: %s", len(chunks), path)
+                all_chunks.extend(chunks)
+            except Exception as e:
+                logging.error("Failed to process document %s: %s", path, e)
+                raise MyException(f"Error processing document {path}: {e}", sys)
 
-            if not all_chunks:
-                raise MyException("No chunks generated; check document config and ensure documents are enabled.", sys)
+        if not all_chunks:
+            raise MyException(
+                "No chunks generated from configured documents. Source may have no extractable text (e.g., scanned PDF/image-only pages).",
+                sys,
+            )
 
-            # Create vector store and retriever
-            logging.info("Creating vector store with %d total chunks...", len(all_chunks))
-            self.vector_store = FaissVectorStore().create_vector_store(all_chunks)
-            self.retriever = RerankMMRRetriever(self.vector_store, self.reranker)
-            logging.info("Vector store prepared successfully with %d chunks", len(all_chunks))
-        except Exception as e:
-            logging.exception("Failed to prepare vector store: %s", e)
-            raise MyException(e, sys)
+        logging.info("Creating vector store with %d total chunks...", len(all_chunks))
+        self.vector_store = FaissVectorStore().create_vector_store(all_chunks)
+        self.retriever = RerankMMRRetriever(self.vector_store, self.reranker)
+        logging.info("Vector store prepared successfully with %d chunks", len(all_chunks))
 
     # ----------------------------
     # Retrieval + Routing
     # ----------------------------
     def retrieve(self, query: str) -> List[Document]:
-        """Retrieve relevant documents for a query."""
         if self.retriever is None:
             raise MyException("Retriever not initialized. Call prepare_vector_store().", sys)
 
-        query_preview = query[:100] if len(query) > 100 else query
+        query_preview = query[:100]
         logging.info("Retrieving documents for query: %s", query_preview)
-        
+
         retr_cfg = self.config.get("retrieval", {})
-        retrieve_kwargs = {}
-        
-        # Add retrieval parameters if present in config
         optional_keys = ["lambda_mult", "initial_pct", "rerank_pct", "mmr_pct", "min_chunk"]
-        for key in optional_keys:
-            if key in retr_cfg:
-                retrieve_kwargs[key] = retr_cfg[key]
+        retrieve_kwargs = {k: retr_cfg[k] for k in optional_keys if k in retr_cfg}
 
         documents = self.retriever.retrieve(query, **retrieve_kwargs)
         logging.info("Retrieved %d documents for query", len(documents))
         return documents
 
     def answer(self, query: str) -> dict:
-        """Retrieve context, generate an answer, and use secure KB fallback on hallucination."""
-        try:
-            query_preview = query[:100] if len(query) > 100 else query
-            logging.info("Generating answer for query: %s", query_preview)
+        query_preview = query[:100]
+        logging.info("Generating answer for query: %s", query_preview)
 
-            documents = self.retrieve(query)
-            if not documents:
-                logging.warning("No documents retrieved for query: %s", query)
-                return {
-                    "final_answer": "I don't have enough information to answer this question based on the provided documents.",
-                    "source": "rag",
-                    "confidence_score": 0.0,
-                }
-
-            answer = self._answer_with_stuff(query, documents)
-            logging.info("Answer generated, checking hallucination")
-
-            detection = HallucinationDetector().detect_hallucination(answer, build_context(documents))
-            confidence_score = detection.get("similarity_score", 0.0)
-
-            if detection.get("is_hallucinated"):
-                logging.warning("Hallucination detected for query, using secure KB fallback")
-                token = self.request_kb_token()
-                if token:
-                    kb_info = self.secure_kb_fetch(token, query)
-                    if kb_info and kb_info.get("data"):
-                        final_answer = self._answer_with_kb(query, kb_info["data"])
-                        return {
-                            "final_answer": final_answer,
-                            "source": "kb-secure",
-                            "confidence_score": kb_info.get("score", 0.0),
-                        }
-                    logging.warning("Secure KB fetch returned no match for query: %s", query)
-                else:
-                    logging.warning("Secure KB token request failed for query: %s", query)
-            else:
-                logging.info("No hallucination detected, return final answer.")
-
+        documents = self.retrieve(query)
+        if not documents:
+            logging.warning("No documents retrieved for query: %s", query)
             return {
-                "final_answer": answer,
+                "final_answer": "I don't have enough information to answer this question based on the provided documents.",
                 "source": "rag",
-                "confidence_score": confidence_score,
+                "confidence_score": 0.0,
             }
-        except Exception as e:
-            logging.exception("Failed to generate answer: %s", e)
-            raise MyException(e, sys)
+
+        answer = self._answer_with_stuff(query, documents)
+        logging.info("Answer generated, checking hallucination")
+
+        detection = self.hallucination_detector.detect_hallucination(answer, build_context(documents))
+        confidence_score = detection.get("similarity_score", 0.0)
+
+        if detection.get("is_hallucinated"):
+            logging.warning("Hallucination detected for query, using secure KB fallback")
+            token = self.request_kb_token()
+            if token:
+                kb_info = self.secure_kb_fetch(token, query)
+                if kb_info and kb_info.get("data"):
+                    final_answer = self._answer_with_kb(query, kb_info["data"])
+                    return {
+                        "final_answer": final_answer,
+                        "source": "kb-secure",
+                        "confidence_score": kb_info.get("score", 0.0),
+                    }
+                logging.warning("Secure KB fetch returned no match for query: %s", query)
+            else:
+                logging.warning("Secure KB token request failed for query: %s", query)
+        else:
+            logging.info("No hallucination detected, return final answer.")
+
+        return {
+            "final_answer": answer,
+            "source": "rag",
+            "confidence_score": confidence_score,
+        }
 
     # ----------------------------
     # Prompting strategies
     # ----------------------------
     def _answer_with_stuff(self, query: str, docs: Sequence[Document]) -> str:
-        """Generate answer using Stuff strategy (all context in one prompt)."""
-        # Build context without citations for clean answer
         context_str = build_context(docs, include_citations=False)
-        
-        # Build the user prompt
-        user_prompt = USER_PROMPT.format(
-            context = context_str,
-            question = query
-        )
-        
-        # Use proper message format for the LLM
+        user_prompt = USER_PROMPT.format(context=context_str, question=query)
+
         messages = [
             SystemMessage(content=SYSTEM_PROMPT),
             HumanMessage(content=user_prompt)
         ]
-        
+
         logging.info("Using Stuff strategy with %d docs", len(docs))
         logging.info("Context length: %d characters", len(context_str))
-        # Generate response from LLM
+
         response = self.llm.invoke(messages)
         answer = getattr(response, "content", str(response))
         logging.info("Generated answer length: %d characters", len(answer))
-        # Sanitize answer preview for logging
-        try:
-            answer_preview = answer[:200].encode('ascii', errors='replace').decode('ascii') if answer else "Empty"
-            logging.debug("Answer preview: %s", answer_preview)
-        except Exception:
-            logging.debug("Answer preview: [contains non-ASCII characters]")
         return answer
 
     # ----------------------------
@@ -270,12 +269,7 @@ class RAGPipeline:
         return None
 
     def _answer_with_kb(self, query: str, kb_data: str) -> str:
-
-        #Build the user prompt
-        user_prompt = USER_PROMPT_FALLBACK_KB.format(
-            kb_context = kb_data,
-            question = query
-        )
+        user_prompt = USER_PROMPT_FALLBACK_KB.format(kb_context=kb_data, question=query)
 
         messages = [
             SystemMessage(content=SYSTEM_PROMPT),
@@ -283,7 +277,6 @@ class RAGPipeline:
         ]
 
         response = self.llm.invoke(messages)
-        final_answer = getattr(response, "content", str(response))
-        return final_answer
+        return getattr(response, "content", str(response))
 
     

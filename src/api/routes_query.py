@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 import yaml
 from fastapi import APIRouter, File, Form, UploadFile
 from pydantic import BaseModel
+from src.exception import MyException
 
 if TYPE_CHECKING:
     from src.rag.pipeline import RAGPipeline
@@ -118,7 +119,14 @@ def index_documents(
     _write_documents_to_config(config_path, document_paths)
 
     _get_pipeline.cache_clear()
-    _get_pipeline()
+    try:
+        _get_pipeline()
+    except MyException as exc:
+        return {
+            "indexed_documents": 0,
+            "uploaded_files": [Path(p).name for p in indexed_paths] + url_list,
+            "message": str(exc),
+        }
 
     uploaded_labels = [Path(p).name for p in indexed_paths]
     uploaded_labels.extend(url_list)

@@ -2,6 +2,7 @@ import math
 import os
 import sys
 from typing import Dict, Sequence
+from pathlib import Path
 
 import yaml
 import tiktoken
@@ -27,7 +28,14 @@ def num_tokens_from_string(text: str, model_name: str = "cl100k_base") -> int:
 
 def read_yaml_file(file_path: str) -> dict:
     try:
-        with open(file_path, "rb") as yaml_file:
+        resolved_path = Path(file_path)
+        if not resolved_path.is_absolute():
+            # Resolve relative paths against project root so notebooks/scripts
+            # work regardless of current working directory.
+            project_root = Path(__file__).resolve().parents[2]
+            resolved_path = project_root / resolved_path
+
+        with open(resolved_path, "rb") as yaml_file:
             return yaml.safe_load(yaml_file)
 
     except Exception as e:

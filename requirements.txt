@@ -10,6 +10,7 @@ tiktoken
 pypdf
 from_root
 beautifulsoup4
+lxml
 streamlit
 requests
 python-multipart

@@ -1,7 +1,7 @@
 import sys
 import logging
 
-def error_message_detail(error: Exception, error_detail: sys) -> str:
+def error_message_detail(error: Exception | str, error_detail=None) -> str:
     """
     Extracts detailed error information including file name, line number, and the error message.
 
@@ -9,13 +9,19 @@ def error_message_detail(error: Exception, error_detail: sys) -> str:
     :param error_detail: The sys module to access traceback details.
     :return: A formatted error message string.
     """
-    # Extract traceback details (exception information)
-    _, _, exc_tb = error_detail.exc_info()
+    # Extract traceback details (exception information), if available.
+    exc_tb = None
+    if error_detail is not None and hasattr(error_detail, "exc_info"):
+        _, _, exc_tb = error_detail.exc_info()
+    if exc_tb is None:
+        _, _, exc_tb = sys.exc_info()
 
-    # Get the file name where the exception occurred
+    if exc_tb is None:
+        error_message = f"Error occurred in python script: {str(error)}"
+        logging.error(error_message)
+        return error_message
+
     file_name = exc_tb.tb_frame.f_code.co_filename
-
-    # Create a formatted error message string with file name, line number, and the actual error
     line_number = exc_tb.tb_lineno
     error_message = f"Error occurred in python script: [{file_name}] at line number [{line_number}]: {str(error)}"
     
@@ -28,7 +34,7 @@ class MyException(Exception):
     """
     Custom exception class for handling errors.
     """
-    def __init__(self, error_message: str, error_detail: sys):
+    def __init__(self, error_message: str, error_detail=None):
         """
         Initializes the Exception with a detailed error message.
 
